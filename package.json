@@ -1,0 +1,58 @@
+{
+  "name": "poi-plugin-rika-misc-utils",
+  "version": "0.1.0",
+  "description": "游戏刷新快捷键与舰船改造资材统计",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "logic.js",
+    "shortcuts.js",
+    "data",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "test": "node --test test.js",
+    "check": "node --check index.js && node --check logic.js && node --check shortcuts.js && npm test",
+    "prepublishOnly": "npm run check",
+    "release:check": "npm run check && npm pack --dry-run"
+  },
+  "poiPlugin": {
+    "id": "rika-misc-utils",
+    "title": "Rika 杂项工具",
+    "description": "刷新快捷键、改造消耗与库存统计",
+    "icon": "fa/wrench",
+    "priority": 3,
+    "apiVer": {
+      "11.99.99": "0.1.0"
+    }
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "author": "Rika",
+  "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RikaKagurasaka/poi-plugin-rika-misc-utils.git"
+  },
+  "homepage": "https://github.com/RikaKagurasaka/poi-plugin-rika-misc-utils#readme",
+  "bugs": {
+    "url": "https://github.com/RikaKagurasaka/poi-plugin-rika-misc-utils/issues"
+  },
+  "keywords": [
+    "poi",
+    "poi-plugin",
+    "kancolle",
+    "shortcuts",
+    "remodel"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}
