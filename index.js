@@ -2,10 +2,11 @@
 
 const React = require('react')
 const { store } = require('views/create-store')
-const { config } = require('views/env')
 const { MaterialIcon } = require('views/components/etc/icon')
 const { gameRefreshPage, gameReload } = require('views/services/utils')
 const remote = require('@electron/remote')
+// Released poi versions do not all export config from views/env.
+const config = remote.require('./lib/config')
 const { normalize, normalizeMouse, isMouse, createShortcuts } = require('./shortcuts')
 const { summarize, materials } = require('./logic')
 const h = React.createElement
