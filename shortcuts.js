@@ -75,9 +75,17 @@ function createMouseListener(contents, bindings, onAction, onError) {
     if (['refresh', 'reload'].includes(action) && isMouse(settings.bindings[action]))
       onAction(action)
   }
-  contents.on('console-message', receive)
-  contents.on('did-frame-finish-load', inject)
-  inject()
+  try {
+    contents.on('console-message', receive)
+    contents.on('did-frame-finish-load', inject)
+    inject()
+  } catch (error) {
+    if (!contents.isDestroyed()) {
+      contents.removeListener('console-message', receive)
+      contents.removeListener('did-frame-finish-load', inject)
+    }
+    throw error
+  }
   return {
     update(next, paused) {
       const changed =
@@ -141,6 +149,22 @@ function createInputListener(contents, initialBindings, onAction) {
   }
 }
 
+function watchGlobalShortcutReset(onReset) {
+  const { ipcMain } = require('electron')
+  let active = true
+  const listener = () =>
+    queueMicrotask(() => {
+      if (active) onReset()
+    })
+  ipcMain.on('refresh-shortcut', listener)
+  return {
+    stop() {
+      active = false
+      ipcMain.removeListener('refresh-shortcut', listener)
+    },
+  }
+}
+
 function createShortcuts({
   store,
   host,
@@ -151,14 +175,17 @@ function createShortcuts({
   globalShortcut,
   getGlobal = () => false,
   createMouseListener: listenMouse,
+  watchGlobalShortcutReset: watchReset,
   createInputListener: listen = createInputListener,
 }) {
   let unsubscribe = null
+  let resetWatcher = null
+  let running = false
   const attached = new Map()
   const registered = new Map()
   let lastTrigger = 0
   function invoke(action) {
-    if (isEditing() || !actions[action]) return
+    if (!running || isEditing() || !actions[action]) return
     if (Date.now() - lastTrigger < 700) return
     lastTrigger = Date.now()
     try {
@@ -183,7 +210,9 @@ function createShortcuts({
       }
     }
     for (const [key, action] of registered) {
-      if (desired.get(key) !== action) {
+      if (!globalShortcut.isRegistered(key)) {
+        registered.delete(key)
+      } else if (desired.get(key) !== action) {
         globalShortcut.unregister(key)
         registered.delete(key)
       }
@@ -202,25 +231,28 @@ function createShortcuts({
   function attach(contents) {
     if (!contents || contents.isDestroyed() || attached.has(contents.id)) return
     const listener = listen(contents, localBindings(), invoke)
+    // Record each acquired resource before the next operation can throw.
+    const item = { contents, listener, mouse: null }
+    attached.set(contents.id, item)
     listener.update(localBindings(), isEditing())
-    const mouse =
+    item.mouse =
       contents.id !== host.id && listenMouse
         ? listenMouse(contents, mouseBindings(), invoke, onError)
         : null
-    mouse?.update(mouseBindings(), isEditing())
-    attached.set(contents.id, { contents, listener, mouse })
+    item.mouse?.update(mouseBindings(), isEditing())
   }
   function sync() {
     const active = new Set([host.id])
     attach(host)
+    let game
     try {
-      const game = store.getState().layout?.webview?.ref?.getWebContents()
-      if (game && !game.isDestroyed()) {
-        active.add(game.id)
-        attach(game)
-      }
+      game = store.getState().layout?.webview?.ref?.getWebContents()
     } catch {
       /* The webview can be between detach and dom-ready. */
+    }
+    if (game && !game.isDestroyed()) {
+      active.add(game.id)
+      attach(game)
     }
     for (const [id, item] of attached) {
       if (!active.has(id) || item.contents.isDestroyed()) {
@@ -230,31 +262,66 @@ function createShortcuts({
       }
     }
   }
+  function stop() {
+    running = false
+    const safely = (cleanup) => {
+      try {
+        cleanup()
+      } catch (error) {
+        onError(error)
+      }
+    }
+    safely(() => unsubscribe?.())
+    unsubscribe = null
+    safely(() => resetWatcher?.stop())
+    resetWatcher = null
+    for (const { listener, mouse } of attached.values()) {
+      safely(() => listener.stop())
+      safely(() => mouse?.stop())
+    }
+    attached.clear()
+    for (const key of registered.keys()) safely(() => globalShortcut.unregister(key))
+    registered.clear()
+  }
   return {
     start() {
-      if (unsubscribe) return
-      sync()
-      updateGlobal()
-      unsubscribe = store.subscribe(sync)
+      if (running) return
+      try {
+        running = true
+        sync()
+        updateGlobal()
+        resetWatcher = watchReset?.(() => {
+          if (!running) return
+          // poi just unregistered everything; any newly registered boss key is not ours.
+          registered.clear()
+          try {
+            updateGlobal()
+          } catch (error) {
+            onError(error)
+          }
+        })
+        unsubscribe = store.subscribe(() => {
+          try {
+            sync()
+          } catch (error) {
+            stop()
+            onError(error)
+          }
+        })
+      } catch (error) {
+        stop()
+        throw error
+      }
     },
     update() {
+      if (!running) return
       for (const { listener, mouse } of attached.values()) {
         listener.update(localBindings(), isEditing())
         mouse?.update(mouseBindings(), isEditing())
       }
       updateGlobal()
     },
-    stop() {
-      unsubscribe?.()
-      unsubscribe = null
-      for (const { listener, mouse } of attached.values()) {
-        listener.stop()
-        mouse?.stop()
-      }
-      attached.clear()
-      for (const key of registered.keys()) globalShortcut.unregister(key)
-      registered.clear()
-    },
+    stop,
   }
 }
 
@@ -265,4 +332,5 @@ module.exports = {
   createInputListener,
   createMouseListener,
   createShortcuts,
+  watchGlobalShortcutReset,
 }

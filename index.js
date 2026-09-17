@@ -53,27 +53,41 @@ function response(event) {
 }
 function start() {
   if (shortcuts) return
-  shortcuts = createShortcuts({
-    store,
-    host: remote.getCurrentWebContents(),
-    getBindings: readBindings,
-    actions: { refresh: gameRefreshPage, reload: gameReload },
-    isEditing: editing,
-    onError: reportError,
-    globalShortcut: remote.globalShortcut,
-    getGlobal: readGlobal,
-    createInputListener: remote.require(require.resolve('./shortcuts')).createInputListener,
-    createMouseListener: remote.require(require.resolve('./shortcuts')).createMouseListener,
-  })
-  shortcuts.start()
-  window.addEventListener('game.response', response)
-  window.addEventListener('focusin', syncEditing)
-  window.addEventListener('focusout', syncEditing)
-  window.addEventListener('focus', syncEditing)
-  window.addEventListener('blur', syncEditing)
+  try {
+    const mainShortcuts = remote.require(require.resolve('./main-loader')).loadShortcuts()
+    const controller = createShortcuts({
+      store,
+      host: remote.getCurrentWebContents(),
+      getBindings: readBindings,
+      actions: { refresh: gameRefreshPage, reload: gameReload },
+      isEditing: editing,
+      onError: reportError,
+      globalShortcut: remote.globalShortcut,
+      getGlobal: readGlobal,
+      createInputListener: mainShortcuts.createInputListener,
+      createMouseListener: mainShortcuts.createMouseListener,
+      watchGlobalShortcutReset: mainShortcuts.watchGlobalShortcutReset,
+    })
+    controller.start()
+    shortcuts = controller
+    window.addEventListener('game.response', response)
+    window.addEventListener('focusin', syncEditing)
+    window.addEventListener('focusout', syncEditing)
+    window.addEventListener('focus', syncEditing)
+    window.addEventListener('blur', syncEditing)
+  } catch (error) {
+    stop()
+    reportError(error)
+  }
 }
 function syncEditing() {
-  queueMicrotask(() => shortcuts?.update())
+  queueMicrotask(() => {
+    try {
+      shortcuts?.update()
+    } catch (error) {
+      reportError(error)
+    }
+  })
 }
 function stop() {
   shortcuts?.stop()
@@ -520,7 +534,24 @@ function App() {
         ? h(ShortcutsTab)
         : h(StatsTab, { key: state.info?.basic?.api_member_id || 'offline', state }),
     ),
-    error && h('p', { role: 'alert' }, error),
+    error &&
+      h(
+        'div',
+        { role: 'alert' },
+        h('p', null, error),
+        h(
+          'button',
+          {
+            onClick: () => {
+              stop()
+              errorMessage = ''
+              notify()
+              start()
+            },
+          },
+          '重新初始化快捷键',
+        ),
+      ),
   )
 }
 
